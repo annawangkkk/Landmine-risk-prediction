@@ -20,5 +20,5 @@ python train.py --load_json '...your_root_folder.../params_exp05052022113240.jso
 ```
 python evaluation.py --root (your root folder) --curr_time timestamp --model_name SVM
 ```
-Your evaluation results will be saved in exp/timestamp/eval folder.
+* Your evaluation results will be saved in exp/timestamp/eval folder.
 * **Step 4**: Follow instructions in visualize_demo.ipynb to plot all necessary figures. 
