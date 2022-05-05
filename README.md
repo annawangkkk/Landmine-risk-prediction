@@ -4,7 +4,7 @@
 * Step 0: Creat a new conda environment is strongly recommended. Make sure you have these packages:
     * pytorch (cpu-version is sufficient)
     * gpytorch
-    * pdplot
+    * pdpbox
     * matplotlib==3.2.2 (compatible with pdplot)
     * geopandas
     * scikit-learn
