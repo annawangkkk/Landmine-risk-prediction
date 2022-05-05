@@ -1,0 +1,11 @@
+# all experiment files
+exp_local/
+
+# all pycache
+__pycache__/
+
+# ipynb checkpoints
+.ipynb_checkpoints/
+
+# features
+raw_dataset/
