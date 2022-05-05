@@ -14,8 +14,8 @@
 ```
 python train.py --load_json '...your_root_folder.../params_exp05052022113240.json'
 ```
-Your results (the best model, probabilities, feature selection intermediate steps, log) will be automatically saved in the exp/timestamp folder. The json file will be automatically moved into the exp/timestamp folder.
-    * If you attempt to overwrite old experiment results, you will receive "Are you sure to overwrite ....", please remember to type **y/n** in the Terminal.
+* Your results (the best model, probabilities, feature selection intermediate steps, log) will be automatically saved in the exp/timestamp folder. The json file will be automatically moved into the exp/timestamp folder.
+* If you attempt to overwrite old experiment results, you will receive "Are you sure to overwrite ....", please remember to type **y/n** in the Terminal.
 * Step 3: Evaluate model on unseen region. You can specify the flags to run evaluation.py. For example, if you want to evaluate SVM using the model saved in exp/timestamp, run 
 ```
 python evaluation.py --root (your root folder) --curr_time timestamp --model_name SVM
