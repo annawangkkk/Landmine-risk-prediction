@@ -300,7 +300,7 @@ if __name__ == '__main__':
         help='Load settings from file in json format.')
     args = parser.parse_args()
     json_dir = args.load_json
-    if not os.exists(json_dir):
+    if not os.path.exists(json_dir):
         time_info = json_dir.split("/")[-1].split(".")[0].split("_")[-1][3:]
         json_dir = '/'.join(json_dir.split("/")[:-1]) + f'/exp/{time_info}/params_exp{time_info}.json'
         print(f"Opened json file {json_dir}")
