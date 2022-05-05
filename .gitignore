@@ -1,3 +1,6 @@
+# macOS
+.DS_Store
+
 # all experiment files
 exp_local/
 
