@@ -6,7 +6,9 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from sklearn.svm import NuSVC
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import KNNImputer
+from sklearn import tree
 import lightgbm as lgb
 from gp import DiriGPC
 from visualize_utils import *
@@ -75,6 +77,21 @@ def select_best_C(model, model_name, X, y, reg_params):
         X_train, X_test = X[train_index,:], X[test_index,:]
         y_train, y_test = y[train_index], y[test_index]
         X_train, X_test = preprocess_X(X_train, X_test)
+
+        if args.reg_params is None:
+            print("Learning best candidate parameters...", file=f)
+            start = 3e-3
+            end = 1e2
+            clf = tree.DecisionTreeRegressor()
+            candidate_reg_params = np.random.uniform(start, end, size=500)
+            y_num_features = []
+            for reg_param in candidate_reg_params:
+                model_ftrs = LogisticRegression(penalty = 'l1', C = reg_param, solver = 'saga')
+                model_ftrs.fit(X_train,y_train)
+            y_num_features.append(len(np.where(model_ftrs.coef_ != 0)[1]))
+            clf = clf.fit(candidate_reg_params, y_num_features)
+            reg_params = clf.predict(list(range(1,num_features + 1))) # covers 1 to the full model
+            print("Best candidate paramers...", reg_params, file=f)
         
         for reg_param in reg_params:
             model_ftrs = LogisticRegression(penalty = 'l1', C = reg_param, solver = 'saga')
@@ -130,6 +147,7 @@ def select_best_fold(model, model_name, X, y, C):
         X: all labeled features
         y: all labeled ground truth
         C: the best regularization parameter returned from select_best_C()
+           if C is None, use full model
         return: 
             best train fold's index in all labeled features X
     '''
@@ -152,13 +170,13 @@ def select_best_fold(model, model_name, X, y, C):
         y_train, y_test = y[train_index], y[test_index]
         X_train, X_test = preprocess_X(X_train, X_test)
         
-        model_ftrs = LogisticRegression(penalty = 'l1', C = C, solver = 'saga')
-        model_ftrs.fit(X_train,y_train)
-        if full:
+        if C is None:
             X_train_red = X_train
             X_test_red = X_test
             selected_features = features
         else:
+            model_ftrs = LogisticRegression(penalty = 'l1', C = C, solver = 'saga')
+            model_ftrs.fit(X_train,y_train)
             X_train_red = X_train[:, np.where(model_ftrs.coef_ != 0)[1]]
             X_test_red = X_test[:, np.where(model_ftrs.coef_ != 0)[1]]
             selected_features = np.where(model_ftrs.coef_ != 0)[1]
@@ -185,17 +203,25 @@ def select_best_fold(model, model_name, X, y, C):
     sorted_auc = np.argsort(np.array(test_auc_cv))
     diff = sorted_bce - sorted_auc
     res = train_idxs[np.argmin(diff)]
+    print("5-fold valid avg",
+          "wBCE",np.mean(test_bce_cv),
+          "roc_auc",np.mean(test_auc_cv),
+          file=f)
+    print("Best valid fold",
+          "wBCE",test_bce_cv[np.argmin(diff)],
+          "roc_auc",test_auc_cv[np.argmin(diff)],
+          file=f)
     with open(save_path + f'/{model_name}_best_train_idx.txt', 'w') as r:
         for i in res:
             r.write("%s\n" % i)
     return res
 
-def train(model, model_name, X, y, C, best_train_idx):
+def train(model, model_name, X, y, best_train_idx, C):
     '''
         X: all labeled features
         y: all labeled ground truth
-        C: a regularization parameter C
         best_train_idx: best train fold's index
+        C: a regularization parameter C
         return:
             (calibrated) model and selected features
     '''
@@ -215,13 +241,13 @@ def train(model, model_name, X, y, C, best_train_idx):
         X[:,idx] = best_imputer.transform(X)[:,idx]
         X[:,idx] = best_imputer.transform(X)[:,idx]
     X[:, 0:len(numeric_cols)] = best_scaler.transform(X)[:, 0:len(numeric_cols)]
-    lasso = LogisticRegression(penalty = 'l1', C = C, solver = 'saga')
-    lasso.fit(X,y)
-    if full:
+    if C is None:
         X_test_red = X[best_test_idx,:]
         y_test_red = y[best_test_idx]
         X_all_red = X
     else:
+        lasso = LogisticRegression(penalty = 'l1', C = C, solver = 'saga')
+        lasso.fit(X,y)
         X_test_red = X[:, np.where(lasso.coef_ != 0)[1]][best_test_idx,:]
         y_test_red = y[best_test_idx]
         X_all_red = X[:, np.where(lasso.coef_ != 0)[1]]
@@ -244,10 +270,17 @@ def train(model, model_name, X, y, C, best_train_idx):
     else:'''
     bce = weightBCE(y, X_all_proba, pos_weight=50)
     roc_auc = roc_auc_score(y, X_all_proba)
-    print("wBCE:",bce, "roc_auc:",roc_auc,
-        "selected_labels:",np.array(features)[np.where(lasso.coef_ != 0)[1]],file=f)
-    pickle.dump(model, open(save_path+f'/{model_name}.pkl','wb'))
-    return model, np.array(features)[np.where(lasso.coef_ != 0)[1]]
+    if C is None:
+        print("Metrics for model fitted on the full labeled dataset", 
+        "wBCE:",bce, "roc_auc:",roc_auc, "selected_labels:", "all features", file=f)
+        pickle.dump(model, open(save_path+f'/{model_name}.pkl','wb'))
+        return model, np.array(features)
+    else:
+        print("Metrics for model fitted on the full labeled dataset", 
+            "wBCE:",bce, "roc_auc:",roc_auc,
+            "selected_labels:",np.array(features)[np.where(lasso.coef_ != 0)[1]],file=f)
+        pickle.dump(model, open(save_path+f'/{model_name}.pkl','wb'))
+        return model, np.array(features)[np.where(lasso.coef_ != 0)[1]]
 
 
 def get_probability(best_model, model_name, best_fold, selected_features, X_all, numeric_cols, save_path):
@@ -286,10 +319,13 @@ def load_models(model_name, save_path, suffix=""):
         clf = pickle.load(m)
     return clf
 
-def complete_pipeline():
-    estimate_best_C = select_best_C(model, model_name, X, y, args.reg_parameters)
+def complete_pipeline(full):
+    if full:
+        estimate_best_C = None
+    else:
+        estimate_best_C = select_best_C(model, model_name, X, y, args.reg_parameters)
     best_train_idx = select_best_fold(model, model_name, X, y, estimate_best_C)
-    best_model, selected_features = train(model, model_name, X, y, estimate_best_C, best_train_idx)
+    best_model, selected_features = train(model, model_name, X, y, best_train_idx, estimate_best_C)
     best_fold = pd.DataFrame(X[best_train_idx, :])
     best_fold.columns = features
     output = get_probability(best_model, model_name, best_fold, selected_features, grid_all, numeric_cols, save_path)
@@ -300,10 +336,12 @@ if __name__ == '__main__':
         help='Load settings from file in json format.')
     args = parser.parse_args()
     json_dir = args.load_json
+    path_not_exist = False
     if not os.path.exists(json_dir):
         time_info = json_dir.split("/")[-1].split(".")[0].split("_")[-1][3:]
         json_dir = '/'.join(json_dir.split("/")[:-1]) + f'/exp/{time_info}/params_exp{time_info}.json'
         print(f"Opened json file {json_dir}")
+        path_not_exist = True
     with open(json_dir, 'rt') as f:
         t_args = argparse.Namespace()
         t_args.__dict__.update(json.load(f))
@@ -327,8 +365,8 @@ if __name__ == '__main__':
             redo = True
         else:
             sys.exit("Terminated by user.")
-    
-    os.replace(args.load_json, args.root + f'/exp/{current_time}/' + args.load_json.split("/")[-1])
+    if not path_not_exist:
+        os.replace(args.load_json, args.root + f'/exp/{current_time}/' + args.load_json.split("/")[-1])
     grid_all = pd.read_csv(args.root + f'/processed_dataset/grid_features_labels.csv')
     grid_clean = grid_all[grid_all['mines_outcome'] != -1].reset_index(drop = True)
     
@@ -348,7 +386,11 @@ if __name__ == '__main__':
     if 'LGBM' in args.models:
         models.append(('LGBM', lgb.LGBMClassifier(num_leaves=args.num_leaves)))
     if 'GP' in args.models:
-        models.append(('GP',DiriGPC(epochs=args.epochs, verbose=args.verbose)))
+        models.append(('GP', DiriGPC(epochs=args.epochs, verbose=args.verbose)))
+    if 'LR' in args.models:
+        models.append(('LR', LogisticRegression(penalty = 'l1', C = 1, solver = 'liblinear')))
+    if 'RF' in args.models:
+        models.append(('RF', RandomForestClassifier(max_depth=3)))
 
     for (model_name, model) in models:
         if redo:
@@ -365,13 +407,13 @@ if __name__ == '__main__':
                 best_fold.columns = features
                 overwrite_output = get_probability(best_model, model_name, best_fold, selected_features, grid_all, numeric_cols, save_path)
             except:
-                print(f"Incomplete prerequisites. Retrain models.")
-                complete_pipeline()
+                print(f"Incomplete prerequisites. Retrain models.", file=f)
+                complete_pipeline(full)
             f.close()
         else:
             f = open(save_path + "/log.txt", "w")
             print("Current model is ", model_name, file=f)
-            complete_pipeline()
+            complete_pipeline(full)
             f.close()
     
 
