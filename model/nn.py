@@ -7,9 +7,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torch.nn import BCELoss
-from torch.optim import SGD, Adam
+from torch.nn import BCEWithLogitsLoss
+from torch.optim import SGD, AdamW
 
+def sigmoid(x):
+    sig = 1 / (1 + torch.exp(-x))     
+    sig = torch.minimum(sig, torch.Tensor([0.999999] * x.shape[0]).reshape(-1,1))  # restrict upper bound
+    sig = torch.maximum(sig, torch.Tensor([0.000001] * x.shape[0]).reshape(-1,1)) # restrict lower bound
+    return sig
 
 class LandmineFeature(Dataset):
     def __init__(self,X,y=None): # allow no targets for feature extraction/unsupervised learning
@@ -32,17 +37,17 @@ class LandmineFeature(Dataset):
 class NN_torch(nn.Module): # standard MLP
     def __init__(self,input_dim):
         super(NN_torch,self).__init__()
-        self.fc1 = nn.Linear(input_dim, 100)
-        self.fc2 = nn.Linear(100, 1)
+        self.fc1 = nn.Linear(input_dim, 20)
+        self.fc2 = nn.Linear(20, 1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        return torch.sigmoid(self.fc2(x))
+        x = F.leaky_relu(self.fc1(x))
+        return self.fc2(x)
 
 
 class NN(BaseEstimator, ClassifierMixin):  
 
-    def __init__(self, batchsize=100, epochs=80, lr=1e-2, omega=50, lambda1=0, lambda2=0, step=-1):
+    def __init__(self, batchsize=100, epochs=30, lr=1e-2, omega=50, lambda1=0, lambda2=0, step=-1):
         self.epochs = epochs
         self.batchsize = batchsize
         self.lr = lr
@@ -72,8 +77,8 @@ class NN(BaseEstimator, ClassifierMixin):
         self.model = nn.DataParallel(NN_torch(X.shape[1]))
         self.model.to(self.device)
         
-        train_loader = DataLoader(train_set, batch_size=self.batchsize, shuffle=False) # TODO: sampler
-        optimizer = Adam(self.model.parameters(), lr=self.lr) 
+        train_loader = DataLoader(train_set, batch_size=self.batchsize, shuffle=True) # TODO: sampler
+        optimizer = AdamW(self.model.parameters(), lr=self.lr, weight_decay=5e-4) 
 
         for epoch in range(self.epochs):
             loss_list = []
@@ -84,9 +89,10 @@ class NN(BaseEstimator, ClassifierMixin):
                 optimizer.zero_grad()
                 data = data.to(self.device)
                 target = target.to(self.device)
-                y_prob = self.model(data).squeeze(-1)
-                loss = BCELoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)) )
-                output_loss = loss(y_prob,target)   
+                out = self.model(data)
+                y_prob = sigmoid(out).squeeze(-1) 
+                loss = BCEWithLogitsLoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)))
+                output_loss = loss(out.squeeze(-1),target)   
                 output_loss.backward()
                 optimizer.step()
                 target = target.detach().cpu().numpy() 
@@ -104,9 +110,10 @@ class NN(BaseEstimator, ClassifierMixin):
                     for idx, (data, target) in enumerate(val_loader):
                         data = data.to(self.device)
                         target = target.to(self.device)
-                        y_prob = self.model(data).squeeze(-1) 
-                        loss = BCELoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)) )
-                        output_loss = loss(y_prob,target)  
+                        out = self.model(data)
+                        y_prob = sigmoid(out).squeeze(-1) 
+                        loss = BCEWithLogitsLoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)) )
+                        output_loss = loss(out.squeeze(-1),target)  
                         target = target.cpu().numpy() 
                         y_val_prob.append(y_prob.detach().cpu().numpy())
                         y_val_truth.append(target)
@@ -128,7 +135,7 @@ class NN(BaseEstimator, ClassifierMixin):
         with torch.no_grad():
             for data in val_loader:
                 data = data.to(self.device)
-                y_prob = self.model(data).squeeze(-1) 
+                y_prob = sigmoid(self.model(data)).squeeze(-1) 
                 probabilities[1].extend(list(y_prob.detach().cpu().numpy()))
                 probabilities[0].extend(list((1-y_prob).detach().cpu().numpy()))
         return np.array(probabilities).T
@@ -143,7 +150,7 @@ class NN(BaseEstimator, ClassifierMixin):
         with torch.no_grad():
             for data in val_loader:
                 data = data.to(self.device)
-                y_prob = self.model(data).squeeze(-1) 
+                y_prob = sigmoid(self.model(data)).squeeze(-1) 
                 y_pred = [0 if y < threshold else 1 for y in y_prob]
                 y_preds.extend(y_pred)
         return np.array(y_preds)
@@ -161,9 +168,10 @@ class NN(BaseEstimator, ClassifierMixin):
             for data, target in val_loader:
                 data = data.to(self.device)
                 target = target.to(self.device)
-                y_prob = self.model(data).squeeze(-1) 
-                loss = BCELoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)) )
-                output_loss = loss(y_prob,target)  
+                out = self.model(data)
+                y_prob = sigmoid(out).squeeze(-1) 
+                loss = BCEWithLogitsLoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)) )
+                output_loss = loss(out.squeeze(-1),target)  
                 target = target.cpu().numpy() 
                 y_val_prob.extend(list(y_prob.detach().cpu().numpy()))
                 y_val_truth.extend(list(target.detach().cpu().numpy()))

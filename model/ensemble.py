@@ -13,7 +13,15 @@ class LossVotingClassifier(object):
         predicted_prob = []
         raw_weights = []
         for (name, clf) in self.estimators:
-            clf.fit(X, y)
+            if name == 'TabNet':
+                clf.fit(X, y,
+                max_epochs=150 , patience=50,
+                batch_size=100, virtual_batch_size=50,
+                weights=1,
+                drop_last=False
+                )
+            else:
+                clf.fit(X, y)
             p = clf.predict_proba(X)[:,1]
             predicted_prob.append(p)
             # calculate wBCE
@@ -32,6 +40,7 @@ class LossVotingClassifier(object):
             predicted_prob.append(p)
         for w in self.weights:
             res[:,1] += w * p
+        res[:,1] /= sum(self.weights)
         res[:,0] = 1 - res[:, 1]
         return res
     

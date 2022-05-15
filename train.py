@@ -10,24 +10,44 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import KNNImputer
 from sklearn import tree
 import lightgbm as lgb
-from gp import DiriGPC
+from model.gp import DiriGPC
+from model.nn import NN
+from model.ensemble import LossVotingClassifier
+import torch
+from pytorch_tabnet.tab_model import TabNetClassifier
 from visualize_utils import *
+from utils import weightBCE
 
 import pickle
 import os
 import argparse
 import json
 import sys
+import copy
 
 
-def weightBCE(y, p, pos_weight=50):
-    '''
-        y: truth label
-        p: predicted probability
-        pos_weight: weight on Y = 1 to penalize false negatives
-    '''
-    # weighted binary cross entropy
-    return  np.sum(y * -1 * np.log(p) * pos_weight + (1 - y) * -1 * np.log(1 - p)) / len(p)
+def restart(model_name):
+    new_models = {'SVM': NuSVC(kernel ='rbf', nu=0.31, probability = True),
+                          'LGBM': lgb.LGBMClassifier(num_leaves=45),
+                          'GP': DiriGPC(epochs=5, verbose=1),
+                          'LR': LogisticRegression(penalty = 'l1', C = 1, solver = 'liblinear'),
+                          'RF': RandomForestClassifier(max_depth=3),
+                          'NN': NN(batchsize=1024, epochs=150, lr=1e-2, omega=50),
+                          'TabNet': TabNetClassifier(optimizer_fn=torch.optim.AdamW,
+                                    optimizer_params=dict(lr=1e-2,weight_decay=5e-4),
+                                    scheduler_params={"step_size":10, "gamma":0.9},
+                                    scheduler_fn=torch.optim.lr_scheduler.StepLR,
+                                    mask_type='entmax')}
+    m = model_name
+    if m.find('+') == -1:
+        models = new_models[m]
+    else: # ensembles
+        base_models = []
+        base_model_names = m.split("+")
+        for base_model_name in base_model_names:
+            base_models.append((base_model_name,new_models[base_model_name]))
+        models = LossVotingClassifier(estimators=base_models)
+    return models
 
 def preprocess_X(X_train, X_test):
     '''
@@ -78,7 +98,7 @@ def select_best_C(model, model_name, X, y, reg_params):
         y_train, y_test = y[train_index], y[test_index]
         X_train, X_test = preprocess_X(X_train, X_test)
 
-        if args.reg_params is None:
+        if args.reg_parameters is None:
             print("Learning best candidate parameters...", file=f)
             start = 3e-3
             end = 1e2
@@ -101,7 +121,18 @@ def select_best_C(model, model_name, X, y, reg_params):
             X_test_red = X_test[:, np.where(model_ftrs.coef_ != 0)[1]]
             selected_features = np.where(model_ftrs.coef_ != 0)[1]
             
-            model.fit(X_train_red,y_train)
+            model = restart(model_name)
+            if model_name == 'TabNet':
+                model.fit(X_train_red, y_train,
+                max_epochs=150 , patience=50,
+                batch_size=100, virtual_batch_size=50,
+                weights=1,
+                drop_last=False
+                )
+            elif model_name == 'NN':
+                model.fit(X_train_red,y_train,X_test_red,y_test)
+            else:
+                model.fit(X_train_red,y_train)
             X_train_proba = model.predict_proba(X_train_red)[:,1]
             X_test_proba = model.predict_proba(X_test_red)[:,1]
             '''if calibrated:
@@ -181,7 +212,16 @@ def select_best_fold(model, model_name, X, y, C):
             X_test_red = X_test[:, np.where(model_ftrs.coef_ != 0)[1]]
             selected_features = np.where(model_ftrs.coef_ != 0)[1]
         
-        model.fit(X_train_red,y_train)
+        model = restart(model_name)
+        if model_name == 'TabNet':
+            model.fit(X_train_red, y_train,
+            max_epochs=150 , patience=50,
+            batch_size=100, virtual_batch_size=50,
+            weights=1,
+            drop_last=False
+            )
+        else:
+            model.fit(X_train_red,y_train)
         X_train_proba = model.predict_proba(X_train_red)[:,1]
         X_test_proba = model.predict_proba(X_test_red)[:,1]
         # make sure the output probability well-calibrated before calculating AUC
@@ -237,21 +277,31 @@ def train(model, model_name, X, y, best_train_idx, C):
     best_imputer = imputer.fit(best_fold)
     best_scaler = scaler.fit(best_fold)
     idx = np.argwhere(np.isnan(X).any(axis=0)).flatten() # find the rwi column
+    X_tmp = copy.deepcopy(X)
     if len(idx) > 0:
-        X[:,idx] = best_imputer.transform(X)[:,idx]
-        X[:,idx] = best_imputer.transform(X)[:,idx]
-    X[:, 0:len(numeric_cols)] = best_scaler.transform(X)[:, 0:len(numeric_cols)]
+        X_tmp[:,idx] = best_imputer.transform(X_tmp)[:,idx]
+        X_tmp[:,idx] = best_imputer.transform(X_tmp)[:,idx]
+    X_tmp[:, 0:len(numeric_cols)] = best_scaler.transform(X_tmp)[:, 0:len(numeric_cols)]
     if C is None:
-        X_test_red = X[best_test_idx,:]
+        X_test_red = X_tmp[best_test_idx,:]
         y_test_red = y[best_test_idx]
-        X_all_red = X
+        X_all_red = X_tmp
     else:
         lasso = LogisticRegression(penalty = 'l1', C = C, solver = 'saga')
-        lasso.fit(X,y)
-        X_test_red = X[:, np.where(lasso.coef_ != 0)[1]][best_test_idx,:]
+        lasso.fit(X_tmp,y)
+        X_test_red = X_tmp[:, np.where(lasso.coef_ != 0)[1]][best_test_idx,:]
         y_test_red = y[best_test_idx]
-        X_all_red = X[:, np.where(lasso.coef_ != 0)[1]]
-    model.fit(X_all_red,y)
+        X_all_red = X_tmp[:, np.where(lasso.coef_ != 0)[1]]
+    model = restart(model_name)
+    if model_name == 'TabNet':
+        model.fit(X_all_red, y,
+        max_epochs=150 , patience=50,
+        batch_size=100, virtual_batch_size=50,
+        weights=1,
+        drop_last=False
+        )
+    else:
+        model.fit(X_all_red,y)
     X_all_proba = model.predict_proba(X_all_red)[:,1]
     '''if calibrated:
         calibrated_clf = CalibratedClassifierCV(base_estimator=model, method="sigmoid", cv=3)
@@ -339,7 +389,7 @@ if __name__ == '__main__':
     path_not_exist = False
     if not os.path.exists(json_dir):
         time_info = json_dir.split("/")[-1].split(".")[0].split("_")[-1][3:]
-        json_dir = '/'.join(json_dir.split("/")[:-1]) + f'/exp/{time_info}/params_exp{time_info}.json'
+        json_dir = '/'.join(json_dir.split("/")[:-1]) + f'/exp_local/{time_info}/params_exp{time_info}.json'
         print(f"Opened json file {json_dir}")
         path_not_exist = True
     with open(json_dir, 'rt') as f:
@@ -353,7 +403,7 @@ if __name__ == '__main__':
     verbose = args.verbose
     current_time = args.curr_time
     full = args.isfull
-    save_path = args.root + f'/exp/{current_time}'
+    save_path = args.root + f'/exp_local/{current_time}'
     print("All experiment results will be saved in", save_path)
     
     redo = False
@@ -366,7 +416,7 @@ if __name__ == '__main__':
         else:
             sys.exit("Terminated by user.")
     if not path_not_exist:
-        os.replace(args.load_json, args.root + f'/exp/{current_time}/' + args.load_json.split("/")[-1])
+        os.replace(args.load_json, args.root + f'/exp_local/{current_time}/' + args.load_json.split("/")[-1])
     grid_all = pd.read_csv(args.root + f'/processed_dataset/grid_features_labels.csv')
     grid_clean = grid_all[grid_all['mines_outcome'] != -1].reset_index(drop = True)
     
@@ -381,16 +431,28 @@ if __name__ == '__main__':
 
     
     models = [] 
-    if 'SVM' in args.models:
-        models.append(('SVM',NuSVC(kernel ='rbf', nu=args.nu, probability = True)))
-    if 'LGBM' in args.models:
-        models.append(('LGBM', lgb.LGBMClassifier(num_leaves=args.num_leaves)))
-    if 'GP' in args.models:
-        models.append(('GP', DiriGPC(epochs=args.epochs, verbose=args.verbose)))
-    if 'LR' in args.models:
-        models.append(('LR', LogisticRegression(penalty = 'l1', C = 1, solver = 'liblinear')))
-    if 'RF' in args.models:
-        models.append(('RF', RandomForestClassifier(max_depth=3)))
+    # TODO: set default params in config outside of json
+    implemented_models = {'SVM': NuSVC(kernel ='rbf', nu=0.31, probability = True),
+                          'LGBM': lgb.LGBMClassifier(num_leaves=45),
+                          'GP': DiriGPC(epochs=5, verbose=1),
+                          'LR': LogisticRegression(penalty = 'l1', C = 1, solver = 'liblinear'),
+                          'RF': RandomForestClassifier(max_depth=3),
+                          'NN': NN(batchsize=1024, epochs=150, lr=1e-2, omega=50),
+                          'TabNet': TabNetClassifier(optimizer_fn=torch.optim.AdamW,
+                                    optimizer_params=dict(lr=1e-2,weight_decay=5e-4),
+                                    scheduler_params={"step_size":10, "gamma":0.9},
+                                    scheduler_fn=torch.optim.lr_scheduler.StepLR,
+                                    mask_type='entmax')}
+    for m in args.models:
+        if m.find('+') == -1:
+            models.append((m,implemented_models[m]))
+        else: # ensembles
+            base_models = []
+            base_model_names = m.split("+")
+            for base_model_name in base_model_names:
+                base_models.append((base_model_name,implemented_models[base_model_name]))
+            models.append((m, LossVotingClassifier(estimators=base_models)))
+    
 
     for (model_name, model) in models:
         if redo:

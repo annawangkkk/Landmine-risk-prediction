@@ -7,11 +7,45 @@ import numpy as np
 from sklearn.impute import KNNImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
+from sklearn.svm import NuSVC
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import KNNImputer
+import lightgbm as lgb
+from model.gp import DiriGPC
+from model.nn import NN
+from model.ensemble import LossVotingClassifier
+import torch
+from pytorch_tabnet.tab_model import TabNetClassifier
 from visualize_utils import plot_proba_dist, plot_heatmap
 import os
 import sys
 import json
 import glob
+
+def restart(model_name):
+    new_models = {'SVM': NuSVC(kernel ='rbf', nu=0.31, probability = True),
+                          'LGBM': lgb.LGBMClassifier(num_leaves=45),
+                          'GP': DiriGPC(epochs=5, verbose=1),
+                          'LR': LogisticRegression(penalty = 'l1', C = 1, solver = 'liblinear'),
+                          'RF': RandomForestClassifier(max_depth=3),
+                          'NN': NN(batchsize=1024, epochs=150, lr=1e-2, omega=50),
+                          'TabNet': TabNetClassifier(optimizer_fn=torch.optim.AdamW,
+                                    optimizer_params=dict(lr=1e-2,weight_decay=5e-4),
+                                    scheduler_params={"step_size":10, "gamma":0.9},
+                                    scheduler_fn=torch.optim.lr_scheduler.StepLR,
+                                    mask_type='entmax')}
+    m = model_name
+    if m.find('+') == -1:
+        models = new_models[m]
+    else: # ensembles
+        base_models = []
+        base_model_names = m.split("+")
+        for base_model_name in base_model_names:
+            base_models.append((base_model_name,new_models[base_model_name]))
+        models = LossVotingClassifier(estimators=base_models)
+    return models
+
 
 def split_numeric_binary(selected_features):
     f = open(save_exp_path + f'/params_exp{args.curr_time}.json')
@@ -36,10 +70,19 @@ def eval(model, best_train_idx, train_grid_clean, test_grid_clean, selected_feat
     if len(idx) > 0:
         testX[:,idx] = best_imputer.transform(testX)[:,idx]
     testX[:, 0:len(numeric_cols)] = best_scaler.transform(testX)[:, 0:len(numeric_cols)]
-    # temporary:
+    # TODO: temporary:
     # refit the model on common features
-    # is this correct? 
-    model.fit(np.array(best_fold), np.array(train_grid_clean['mines_outcome'].iloc[best_train_idx]))
+    # is this correct?
+    model = restart(model_name) # to be deleted
+    if model_name == 'TabNet':
+        model.fit(np.array(best_fold), np.array(train_grid_clean['mines_outcome'].iloc[best_train_idx]),
+        max_epochs=150 , patience=50,
+        batch_size=100, virtual_batch_size=50,
+        weights=1,
+        drop_last=False
+        )
+    else:
+        model.fit(np.array(best_fold), np.array(train_grid_clean['mines_outcome'].iloc[best_train_idx])) # to be changed to model.eval()
     testX_proba = model.predict_proba(testX)[:,1]
     rocauc = roc_auc_score(testy, testX_proba)
     wbce = weightBCE(testy, testX_proba, pos_weight=50)
@@ -47,7 +90,7 @@ def eval(model, best_train_idx, train_grid_clean, test_grid_clean, selected_feat
         print("roc_auc",rocauc, file=f)
         print("wBCE",wbce, file=f)
         print("selected features",selected_features, file=f)  
-    return rocauc, wbce
+    return rocauc, wbce, model
 
 def generate_plots(proba):
     # plot heatmap, distribution
@@ -64,7 +107,7 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     model_name = args.model_name
-    save_exp_path = args.root + f'/exp/{args.curr_time}'
+    save_exp_path = args.root + f'/exp_local/{args.curr_time}'
     save_eval_path = save_exp_path + '/eval'
     if not os.path.exists(save_eval_path):
         os.makedirs(save_eval_path)
@@ -97,7 +140,7 @@ if __name__ == '__main__':
     
     # get numeric and binary cols from json settings, get intersection
     numeric_cols, _ = split_numeric_binary(test_selected_features)
-    eval(best_model, best_train_idx, train_grid_clean, test_grid_clean, test_selected_features)
+    _,_, best_model = eval(best_model, best_train_idx, train_grid_clean, test_grid_clean, test_selected_features)
     best_fold = train_grid_all.iloc[best_train_idx]
     output_test_proba = get_probability(best_model, model_name, best_fold, test_selected_features, 
                                         test_grid_all, numeric_cols, save_eval_path)

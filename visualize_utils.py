@@ -44,18 +44,19 @@ def plot_auc_bce(table, model_name, save_path):
         table: dataframe generated from select_best_C()
     '''
     _, ax = plt.subplots(figsize=(10,8))
-    ax.plot(table['Num. features'], table['Train wBCE'], label = "Train wBCE")
+    #ax.plot(table['Num. features'], table['Train wBCE'], label = "Train wBCE")
     ax.plot(table['Num. features'], table['Test wBCE'], label = "Test wBCE")
     ax.set_title(f'Cross validation Metrics - Logit + {model_name} model', fontsize = 15)
     ax.set_ylabel('weighted BCE (w = 50)', fontsize = 13)
     ax.set_xlabel('# features used', fontsize = 13)
-    ax.legend()
     ax2 = ax.twinx()
     roc_auc = []
-    roc_auc.append(ax2.plot(table['Num. features'], table['Train ROC_AUC'], "r-", label = "Train ROC_AUC"))
+    #roc_auc.append(ax2.plot(table['Num. features'], table['Train ROC_AUC'], "r-", label = "Train ROC_AUC"))
     roc_auc.append(ax2.plot(table['Num. features'], table['Test ROC_AUC'], "g-", label = "Test ROC_AUC"))
     ax2.set_ylabel('ROC_AUC', fontsize = 13)
-    ax2.legend(loc=0)
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax.legend(h1+h2, l1+l2, loc=2)
     plt.savefig(save_path + f'/{model_name}_feature_selection.png')
     plt.clf()
 
