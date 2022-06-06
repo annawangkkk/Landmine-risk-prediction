@@ -37,11 +37,11 @@ class LandmineFeature(Dataset):
 class NN_torch(nn.Module): # standard MLP
     def __init__(self,input_dim):
         super(NN_torch,self).__init__()
-        self.fc1 = nn.Linear(input_dim, 20)
-        self.fc2 = nn.Linear(20, 1)
+        self.fc1 = nn.Linear(input_dim, 100)
+        self.fc2 = nn.Linear(100, 1)
 
     def forward(self, x):
-        x = F.leaky_relu(self.fc1(x))
+        x = nn.Dropout(p=0.5)(F.leaky_relu(self.fc1(x)))
         return self.fc2(x)
 
 
@@ -78,7 +78,7 @@ class NN(BaseEstimator, ClassifierMixin):
         self.model.to(self.device)
         
         train_loader = DataLoader(train_set, batch_size=self.batchsize, shuffle=True) # TODO: sampler
-        optimizer = AdamW(self.model.parameters(), lr=self.lr, weight_decay=5e-4) 
+        optimizer = SGD(self.model.parameters(), lr=self.lr, momentum=0.9, weight_decay=5e-4) 
 
         for epoch in range(self.epochs):
             loss_list = []
@@ -90,8 +90,8 @@ class NN(BaseEstimator, ClassifierMixin):
                 data = data.to(self.device)
                 target = target.to(self.device)
                 out = self.model(data)
-                y_prob = sigmoid(out).squeeze(-1) 
-                loss = BCEWithLogitsLoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)))
+                y_prob = torch.sigmoid(out).squeeze(-1) 
+                loss = BCEWithLogitsLoss()
                 output_loss = loss(out.squeeze(-1),target)   
                 output_loss.backward()
                 optimizer.step()
@@ -111,8 +111,8 @@ class NN(BaseEstimator, ClassifierMixin):
                         data = data.to(self.device)
                         target = target.to(self.device)
                         out = self.model(data)
-                        y_prob = sigmoid(out).squeeze(-1) 
-                        loss = BCEWithLogitsLoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)) )
+                        y_prob = torch.sigmoid(out).squeeze(-1) 
+                        loss = BCEWithLogitsLoss()
                         output_loss = loss(out.squeeze(-1),target)  
                         target = target.cpu().numpy() 
                         y_val_prob.append(y_prob.detach().cpu().numpy())
@@ -135,7 +135,7 @@ class NN(BaseEstimator, ClassifierMixin):
         with torch.no_grad():
             for data in val_loader:
                 data = data.to(self.device)
-                y_prob = sigmoid(self.model(data)).squeeze(-1) 
+                y_prob = torch.sigmoid(self.model(data)).squeeze(-1) 
                 probabilities[1].extend(list(y_prob.detach().cpu().numpy()))
                 probabilities[0].extend(list((1-y_prob).detach().cpu().numpy()))
         return np.array(probabilities).T
@@ -150,7 +150,7 @@ class NN(BaseEstimator, ClassifierMixin):
         with torch.no_grad():
             for data in val_loader:
                 data = data.to(self.device)
-                y_prob = sigmoid(self.model(data)).squeeze(-1) 
+                y_prob = torch.sigmoid(self.model(data)).squeeze(-1) 
                 y_pred = [0 if y < threshold else 1 for y in y_prob]
                 y_preds.extend(y_pred)
         return np.array(y_preds)
@@ -169,8 +169,8 @@ class NN(BaseEstimator, ClassifierMixin):
                 data = data.to(self.device)
                 target = target.to(self.device)
                 out = self.model(data)
-                y_prob = sigmoid(out).squeeze(-1) 
-                loss = BCEWithLogitsLoss(weight = torch.FloatTensor(self.get_BCE_batch_weight(target)) )
+                y_prob = torch.sigmoid(out).squeeze(-1) 
+                loss = BCEWithLogitsLoss()
                 output_loss = loss(out.squeeze(-1),target)  
                 target = target.cpu().numpy() 
                 y_val_prob.extend(list(y_prob.detach().cpu().numpy()))

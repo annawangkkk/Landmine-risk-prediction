@@ -7,6 +7,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.svm import NuSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.impute import KNNImputer
 from sklearn import tree
 import lightgbm as lgb
@@ -28,16 +29,17 @@ import copy
 
 def restart(model_name):
     new_models = {'SVM': NuSVC(kernel ='rbf', nu=0.31, probability = True),
-                          'LGBM': lgb.LGBMClassifier(num_leaves=45),
+                          'LGBM': lgb.LGBMClassifier(num_leaves=args.num_leaves, random_seed=seed),
                           'GP': DiriGPC(epochs=5, verbose=1),
-                          'LR': LogisticRegression(penalty = 'l1', C = 1, solver = 'liblinear'),
+                          'LR': LogisticRegression(penalty='none', solver = 'saga'),
                           'RF': RandomForestClassifier(max_depth=3),
-                          'NN': NN(batchsize=1024, epochs=150, lr=1e-2, omega=50),
+                          'NN': NN(batchsize=1024, epochs=600, lr=5e-3, omega=1),
                           'TabNet': TabNetClassifier(optimizer_fn=torch.optim.AdamW,
                                     optimizer_params=dict(lr=1e-2,weight_decay=5e-4),
                                     scheduler_params={"step_size":10, "gamma":0.9},
                                     scheduler_fn=torch.optim.lr_scheduler.StepLR,
-                                    mask_type='entmax')}
+                                    mask_type='entmax'),
+                          'KNN': KNeighborsClassifier(n_neighbors=15, weights='distance', metric='cosine')}
     m = model_name
     if m.find('+') == -1:
         models = new_models[m]
@@ -49,13 +51,15 @@ def restart(model_name):
         models = LossVotingClassifier(estimators=base_models)
     return models
 
-def preprocess_X(X_train, X_test):
+def preprocess_X(X_train_init, X_test_init):
     '''
         X_train: numpy array
         X_test: numpy array
     '''
     # fit scaler and imputer on X_train
     # transform both X_train and X_test
+    X_train = copy.deepcopy(X_train_init)
+    X_test = copy.deepcopy(X_test_init)
     train_imputer = imputer.fit(X_train)
     idx = np.argwhere(np.isnan(X_train).any(axis=0)).flatten() # find the rwi column
     if len(idx) > 0:
@@ -65,6 +69,25 @@ def preprocess_X(X_train, X_test):
     X_train[:, 0:len(numeric_cols)] = train_scaler.transform(X_train[:, 0:len(numeric_cols)])
     X_test[:, 0:len(numeric_cols)] = train_scaler.transform(X_test[:, 0:len(numeric_cols)])
     return X_train, X_test
+
+def generate_geo_folds(X):
+    '''
+        X(pd.Dataframe): all labeled features
+    '''
+    fold_indices = []
+    all_cities = np.unique(X["Municipio"])
+    balanced_num = len(all_cities) // 5
+    np.random.seed(seed)
+    np.random.shuffle(all_cities)
+    city_groups = []
+    for i in range(5):
+        city_groups.append(all_cities[balanced_num*i:balanced_num*(i+1)])
+        val_idx = []
+        for j in range(len(city_groups[i])):
+            val_idx.extend(list(X.loc[X["Municipio"] == city_groups[i][j], "Municipio"].index.values))
+        train_idx = list(set(list(range(X.shape[0]))) - set(val_idx))
+        fold_indices.append((train_idx, val_idx))
+    return fold_indices
 
 def select_best_C(model, model_name, X, y, reg_params):
     '''
@@ -78,8 +101,11 @@ def select_best_C(model, model_name, X, y, reg_params):
     # ROC_AUC curve.
 
     print("Call select_best_C...",file=f)
-
-    kf = KFold(n_splits=5, random_state=seed, shuffle=True)
+    if split == 'random':
+        kf = KFold(n_splits=5, random_state=seed, shuffle=True)
+        kf_idx = kf.split(X, y)
+    else:
+        kf_idx = generate_geo_folds(grid_clean['Municipio'])
 
     train_bce_cv = []
     test_bce_cv = []
@@ -87,7 +113,7 @@ def select_best_C(model, model_name, X, y, reg_params):
     test_auc_cv = []
     num_features_cv = []
 
-    for train_index, test_index in kf.split(X, y):
+    for train_index, test_index in kf_idx:
         train_bce = []
         test_bce = []
         num_features = []
@@ -161,15 +187,15 @@ def select_best_C(model, model_name, X, y, reg_params):
                     'Test ROC_AUC': np.mean(test_auc_cv, axis = 0),
                     'Num. features': np.mean(num_features_cv, axis = 0)})
     results.to_csv(save_path + f'/{model_name}_feature_selection.csv',index=False)
-    plot_auc_bce(results, model_name, save_path)
+    #plot_auc_bce(results, model_name, save_path)
 
     # find an estimate of the intersection points of two curves
     # make sure wBCE and ROC_AUC are at the same scale
     # let wBCE in the range of [min(ROC), max(ROC)]
-    OldMin, OldMax, NewMin, NewMax = min(results['Test wBCE']), max(results['Test wBCE']), min(results['Test ROC_AUC']), max(results['Test ROC_AUC'])
-    normalizedwBCE = [((x - OldMin) * (NewMax - NewMin)  / (OldMax - OldMin)) + NewMin for x in results['Test wBCE']]
-    idx = np.argwhere(np.diff(np.sign(normalizedwBCE - results['Test ROC_AUC'])) != 0).flatten()[-1]
-    estimate_best_C = reg_params[idx] # the nearest X value before intersection
+    #OldMin, OldMax, NewMin, NewMax = min(results['Test wBCE']), max(results['Test wBCE']), min(results['Test ROC_AUC']), max(results['Test ROC_AUC'])
+    #normalizedwBCE = [((x - OldMin) * (NewMax - NewMin)  / (OldMax - OldMin)) + NewMin for x in results['Test wBCE']]
+    #idx = np.argwhere(np.diff(np.sign(normalizedwBCE - results['Test ROC_AUC'])) != 0).flatten()[-1]
+    estimate_best_C = reg_params[np.argmax(np.mean(test_auc_cv, axis = 0))] # the nearest X value before intersection
     print(f"Best LR Regularizer is {estimate_best_C}", file=f)
     return estimate_best_C
 
@@ -188,14 +214,18 @@ def select_best_fold(model, model_name, X, y, C):
 
     print("Call select_best_fold...",file=f)
 
-    kf = KFold(n_splits=5, random_state=seed, shuffle=True)
+    if split == 'random':
+        kf = KFold(n_splits=5, random_state=seed, shuffle=True)
+        kf_idx = kf.split(X, y)
+    else:
+        kf_idx = generate_geo_folds(grid_clean[['Municipio']])
 
     train_bce_cv = []
     test_bce_cv = []
     train_auc_cv = []
     test_auc_cv = []
     train_idxs = []
-    for train_index, test_index in kf.split(X, y):
+    for train_index, test_index in kf_idx:
             
         X_train, X_test = X[train_index,:], X[test_index,:]
         y_train, y_test = y[train_index], y[test_index]
@@ -238,18 +268,18 @@ def select_best_fold(model, model_name, X, y, C):
         if verbose:
             print("train_roc_auc:",train_auc_cv[-1], "test_roc_auc:",test_auc_cv[-1],file=f)
             print("train_wBCE:",train_bce_cv[-1], "test_wBCE:",test_bce_cv[-1],file=f)
-            print(f"LR + {model_name} selected features:", selected_features,file=f)
-    sorted_bce = np.argsort(-np.array(test_bce_cv))
-    sorted_auc = np.argsort(np.array(test_auc_cv))
-    diff = sorted_bce - sorted_auc
-    res = train_idxs[np.argmin(diff)]
+            if C is None:
+                print(f"{model_name} selected features:", selected_features,file=f)
+            else:
+                print(f"LR + {model_name} selected features:", selected_features,file=f)
+    res = train_idxs[np.argmax(test_auc_cv)]
     print("5-fold valid avg",
           "wBCE",np.mean(test_bce_cv),
           "roc_auc",np.mean(test_auc_cv),
           file=f)
-    print("Best valid fold",
-          "wBCE",test_bce_cv[np.argmin(diff)],
-          "roc_auc",test_auc_cv[np.argmin(diff)],
+    print("Best valid fold num", np.argmax(test_auc_cv),
+          "wBCE",test_bce_cv[np.argmax(test_auc_cv)],
+          "roc_auc",test_auc_cv[np.argmax(test_auc_cv)],
           file=f)
     with open(save_path + f'/{model_name}_best_train_idx.txt', 'w') as r:
         for i in res:
@@ -332,6 +362,60 @@ def train(model, model_name, X, y, best_train_idx, C):
         pickle.dump(model, open(save_path+f'/{model_name}.pkl','wb'))
         return model, np.array(features)[np.where(lasso.coef_ != 0)[1]]
 
+def get_five_prob(C, X, y, X_all, save_path):
+    '''
+        X: all labeled features
+        y: all labeled ground truth
+        X_all: labeled + unlabeled
+        C: the best regularization parameter returned from select_best_C()
+           if C is None, use full model
+    '''
+    X_all_tmp = X_all
+    if split == 'random':
+        kf = KFold(n_splits=5, random_state=seed, shuffle=True)
+        kf_idx = kf.split(X, y)
+    else:
+        kf_idx = generate_geo_folds(grid_clean[['Municipio']])
+    
+    probs = []
+    train_indices = []
+    for idx, (train_index, _) in enumerate(kf_idx):
+        X_all = np.array(X_all_tmp[features])  
+        X_train = X[train_index,:]
+        y_train = y[train_index]
+        X_train, X_all = preprocess_X(X_train, X_all)
+        if C is None:
+            X_train_red = X_train
+            X_all_red = X_all
+        else:
+            model_ftrs = LogisticRegression(penalty = 'l1', C = C, solver = 'saga')
+            model_ftrs.fit(X_train,y_train)
+            X_train_red = X_train[:, np.where(model_ftrs.coef_ != 0)[1]]
+            X_all_red = X_all[:, np.where(model_ftrs.coef_ != 0)[1]]
+        
+        model = restart(model_name)
+        if model_name == 'TabNet':
+            model.fit(X_train_red, y_train,
+            max_epochs=150 , patience=50,
+            batch_size=100, virtual_batch_size=50,
+            weights=1,
+            drop_last=False
+            )
+        else:
+            model.fit(X_train_red,y_train)
+        X_all_proba = model.predict_proba(X_all_red)[:,1]
+        probs.append(X_all_proba)
+        train_indices.append(train_index)
+        pickle.dump(model, open(save_path+f'/{model_name}_CV{idx}.pkl','wb'))
+    X_all_df = X_all_tmp[features]
+    X_all_df["mines_outcome"] = grid_all["mines_outcome"]
+    for i in range(5):
+        X_all_df[f'CVprob{i}'] = probs[i] 
+        with open(save_path + f'/{model_name}_CV{i}_idx.txt', 'w') as r:
+            for j in train_indices[i]:
+                r.write("%s\n" % j)
+    X_all_df.to_csv(save_path + f"/{model_name}_CV_mines_proba.csv",index=False)
+    return X_all_df
 
 def get_probability(best_model, model_name, best_fold, selected_features, X_all, numeric_cols, save_path):
     '''
@@ -374,6 +458,7 @@ def complete_pipeline(full):
         estimate_best_C = None
     else:
         estimate_best_C = select_best_C(model, model_name, X, y, args.reg_parameters)
+    CV_df = get_five_prob(estimate_best_C, X, y, grid_all, save_path)
     best_train_idx = select_best_fold(model, model_name, X, y, estimate_best_C)
     best_model, selected_features = train(model, model_name, X, y, best_train_idx, estimate_best_C)
     best_fold = pd.DataFrame(X[best_train_idx, :])
@@ -384,6 +469,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--load_json',
         help='Load settings from file in json format.')
+    parser.add_argument('--num_leaves', default=45,
+        help='num_leaves in LGBM model.')
+    parser.add_argument('--CV', default='random',
+        help='use random cv or geo-based cv')
     args = parser.parse_args()
     json_dir = args.load_json
     path_not_exist = False
@@ -400,6 +489,7 @@ if __name__ == '__main__':
     seed = args.seed 
     np.random.seed(seed)
     #calibrated = args.calibrated
+    split = args.split
     verbose = args.verbose
     current_time = args.curr_time
     full = args.isfull
@@ -417,7 +507,7 @@ if __name__ == '__main__':
             sys.exit("Terminated by user.")
     if not path_not_exist:
         os.replace(args.load_json, args.root + f'/exp_local/{current_time}/' + args.load_json.split("/")[-1])
-    grid_all = pd.read_csv(args.root + f'/processed_dataset/grid_features_labels.csv')
+    grid_all = pd.read_csv(args.root + f'/processed_dataset/grid_features_withimg_res18.csv') 
     grid_clean = grid_all[grid_all['mines_outcome'] != -1].reset_index(drop = True)
     
     numeric_cols = args.numeric_cols 
@@ -433,16 +523,17 @@ if __name__ == '__main__':
     models = [] 
     # TODO: set default params in config outside of json
     implemented_models = {'SVM': NuSVC(kernel ='rbf', nu=0.31, probability = True),
-                          'LGBM': lgb.LGBMClassifier(num_leaves=45),
+                          'LGBM': lgb.LGBMClassifier(num_leaves=args.num_leaves, random_seed=seed),
                           'GP': DiriGPC(epochs=5, verbose=1),
-                          'LR': LogisticRegression(penalty = 'l1', C = 1, solver = 'liblinear'),
+                          'LR': LogisticRegression(penalty='none', solver = 'saga'),
                           'RF': RandomForestClassifier(max_depth=3),
-                          'NN': NN(batchsize=1024, epochs=150, lr=1e-2, omega=50),
+                          'NN': NN(batchsize=1024, epochs=600, lr=5e-3, omega=1),
                           'TabNet': TabNetClassifier(optimizer_fn=torch.optim.AdamW,
                                     optimizer_params=dict(lr=1e-2,weight_decay=5e-4),
                                     scheduler_params={"step_size":10, "gamma":0.9},
                                     scheduler_fn=torch.optim.lr_scheduler.StepLR,
-                                    mask_type='entmax')}
+                                    mask_type='entmax'),
+                          'KNN': KNeighborsClassifier(n_neighbors=15, weights='distance', metric='cosine')}
     for m in args.models:
         if m.find('+') == -1:
             models.append((m,implemented_models[m]))
