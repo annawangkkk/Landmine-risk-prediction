@@ -15,3 +15,12 @@ raw_dataset/
 
 # paper
 paper/
+
+# refactor code copy
+refactor/
+
+# useless code
+old_code/
+
+# large data
+processed_dataset/
