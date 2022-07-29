@@ -12,7 +12,7 @@ from datetime import datetime
 
 from dataset import *
 from model import ResNet18, ResNet50
-from ..utils import *
+from .. import utils
 
 def train_test(state, arch, test_name, map_type):
     '''
@@ -36,12 +36,12 @@ def train_test(state, arch, test_name, map_type):
         else: # 'res50'
             model = nn.DataParallel(ResNet50(state).to(device))
         optimizer = SGD(model.parameters(), lr=1e-4, momentum=0.99)
-        seed_everything(seed)
+        utils.seed_everything(seed)
         model.train()
         auc_max = 0
         early_stop = 0
-        train_data = Landmine('/home/siqiz/social_good/Landmine-risk-prediction', test_name, 'train_labeled', map_type, transform=train_transform)
-        test_data = Landmine('/home/siqiz/social_good/Landmine-risk-prediction', test_name, 'test_labeled', map_type, transform=test_transform)
+        train_data = Landmine('~/social_good/Landmine-risk-prediction', test_name, 'train_labeled', map_type, transform=train_transform)
+        test_data = Landmine('~/social_good/Landmine-risk-prediction', test_name, 'test_labeled', map_type, transform=test_transform)
         train_loader = DataLoader(train_data, batch_size=256, shuffle=True)
         test_loader = DataLoader(test_data, batch_size=256, shuffle=False)
         for epoch in tqdm(range(epochs)):
@@ -63,17 +63,17 @@ def train_test(state, arch, test_name, map_type):
                 rocauc = roc_auc_score(target.detach().cpu().numpy(),F.softmax(out,dim=1)[:,1].detach().cpu().numpy())
                 fin_acc.append(rocauc)
                 if idx % 100 == 1:
-                    with open(f'/home/siqiz/social_good/{map_type}_models/{test_name}/pure/log.txt','a') as f:
+                    with open(f'~/social_good/{map_type}_models/{test_name}/pure/log.txt','a') as f:
                         f.write(f"Train Epoch: {epoch}, Trained Examples: {num_examples_train}, Loss: {output.item()}\n")
             t_end = datetime.now()
             t_delta = (t_end-t_start).total_seconds()
-            with open(f'/home/siqiz/social_good/{map_type}_models/{test_name}/pure/log.txt','a') as f:
+            with open(f'~/social_good/{map_type}_models/{test_name}/pure/log.txt','a') as f:
                 f.write(f"Train one epoch takes: {t_delta} sec, ROC_AUC: {sum(fin_acc)/len(fin_acc)}\n")
             eval_rocauc = evaluation(model, test_loader, log_dir)
             if eval_rocauc > auc_max:
                 early_stop = 0
                 auc_max = eval_rocauc
-                torch.save(model.state_dict(), f"/home/siqiz/social_good/{map_type}_models/{test_name}/pure/{arch}_{state}_{map_type}_seed{seed}.pth")
+                torch.save(model.state_dict(), f"~/social_good/{map_type}_models/{test_name}/pure/{arch}_{state}_{map_type}_seed{seed}.pth")
             else:
                 early_stop += 1
             five_seeds_res[seed] = auc_max
