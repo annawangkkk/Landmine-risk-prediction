@@ -268,13 +268,20 @@ def prepare_precision_recall(root='~/social_good/Landmine-risk-prediction'):
                 df_roc.to_csv(root + '/processed_dataset/results/all_roc.csv',index=False)       
     return "Completed"
 
-def prepare_test_base_models(root='~/social_good/Landmine-risk-prediction'):
+def prepare_test_base_models(overfit:bool, root='~/social_good/Landmine-risk-prediction'):
     '''
         1. generate prepare_website_underfit.csv on unlabeled & labeled dataset:
-        include REAL fitted on the three different train sets (RANDOM/SONSON/CALDAS)
+        include REAL fitted on the three different train sets (RANDOM/SONSON/CALDAS) 
+        if overfit = False, otherwise, fit on the whole labeled data,
         and then predict on all data to prepare for risk map. 
-        2. return base models and ensemble as the input for feature importance
+        2. return base models and ensemble
+        3. use overfit = False for feature importance, overfit = True for pdp 
+        plots and web interface input
     '''
+    if overfit:
+        fname = 'overfit'
+    else:
+        fname = 'underfit'
     cols_info = FeatureNames('new')
     numeric_cols = cols_info.numeric_cols
     binary_cols = cols_info.binary_cols
@@ -296,7 +303,7 @@ def prepare_test_base_models(root='~/social_good/Landmine-risk-prediction'):
                  'caldas':{'lgb':[],'rf':[],'tabnet':[]},}
     df_proba = pd.read_csv(root + '/processed_dataset/all/all.csv',index_col=0)
     df_proba = df_proba[['mines_outcome','LATITUD_Y','LONGITUD_X']]
-    df_proba.to_csv(root + '/processed_dataset/results/prepare_website_underfit.csv')
+    df_proba.to_csv(root + f'/processed_dataset/results/prepare_website_{fname}.csv')
     underfit_ensembles = {'random':[],'sonson':[],'caldas':[]}
     for split, param_grids in params_grids_splits:
         for model_name, param in param_grids:
@@ -304,8 +311,7 @@ def prepare_test_base_models(root='~/social_good/Landmine-risk-prediction'):
             for idx in tqdm(range(5)):
                 X_train, y_train, X_test, y_test = init_train_test(root, split, numeric_cols, binary_cols, idx)
                 seed_everything(idx)
-                X_train_cv, y_train_cv, X_val_cv, y_val_cv = init_cv(root, split, idx, numeric_cols, binary_cols)
-                X_all_labeled = pd.read_csv(root + f'/processed_dataset/all/all.csv',index_col=0)
+                X_all_labeled = pd.read_csv(root + f'/processed_dataset/all/all_labeled.csv',index_col=0)
                 X_all = np.array(X_all_labeled.loc[:, features])
                 y_all = np.array(X_all_labeled.loc[:, 'mines_outcome'])
                 X_all, _ = preprocessX(X_all, X_test, numeric_cols)
@@ -318,26 +324,27 @@ def prepare_test_base_models(root='~/social_good/Landmine-risk-prediction'):
                     model.fit(X_train,y_train)
                 elif model_name == 'tabnet':
                     model = ScikitTabNet(seed=idx,**param)
-                    model.fit(X_train, y_train, X_test, y_test)
+                    if overfit:
+                        model.fit(X_all, y_all, early_stopping=False)
+                    else:
+                        model.fit(X_train, y_train, X_test, y_test)
                 all_test_bases[split][model_name].append(model)
         for seed in range(5):
             X_train, y_train, X_test, y_test = init_train_test(root, split, numeric_cols, binary_cols, seed)
             seed_everything(seed)
-            X_train_cv, y_train_cv, X_val_cv, y_val_cv = init_cv(root, split, seed, numeric_cols, binary_cols)
-            X_all_labeled = pd.read_csv(root + f'/processed_dataset/all/all.csv',index_col=0)
-            X_all = np.array(X_all_labeled.loc[:, features])
-            y_all = np.array(X_all_labeled.loc[:, 'mines_outcome'])
-            X_all, _ = preprocessX(X_all, X_test, numeric_cols)
+            X_all_everything = pd.read_csv(root + f'/processed_dataset/all/all.csv',index_col=0)
+            X_all_fin = np.array(X_all_everything.loc[:, features])
+            X_all_fin, _ = preprocessX(X_all_fin, X_test, numeric_cols)
             base = [('lgb', all_test_bases[split]['lgb'][seed]),
                     ('rf', all_test_bases[split]['rf'][seed]),
                     ('tabnet', all_test_bases[split]['tabnet'][seed])]
             ensemble_model = VotingClassifier(estimators=base, voting='soft')
             ensemble_model.estimators_ = [m for (name, m) in base]
-            ensemble_model.le_ = LabelEncoder().fit(y_all)
+            ensemble_model.le_ = LabelEncoder().fit(y_test)
             ensemble_model.classes_ = ensemble_model.le_.classes_     
-            df_proba[f'{split}_seed{seed}'] = ensemble_model.predict_proba(X_all)[:,1]
+            df_proba[f'{split}_seed{seed}'] = ensemble_model.predict_proba(X_all_fin)[:,1]
             underfit_ensembles[split].append(ensemble_model)
-        df_proba.to_csv(root + '/processed_dataset/results/prepare_website_underfit.csv')
+        df_proba.to_csv(root + f'/processed_dataset/results/prepare_website_{fname}.csv')
     return all_test_bases, underfit_ensembles
 
 
@@ -346,4 +353,6 @@ if __name__ == '__main__':
     parser.add_argument('--root', help='root directory of the folder.', default='~/social_good/Landmine-risk-prediction')
     args = parser.parse_args()
     prepare_precision_recall(args.root)
-    prepare_test_base_models(args.root)
+    # Two Optional Lines
+    prepare_test_base_models(False, args.root)
+    prepare_test_base_models(True, args.root)

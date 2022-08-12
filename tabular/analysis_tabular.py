@@ -19,7 +19,8 @@ def plot_distribution_shift(root='~/social_good/Landmine-risk-prediction'):
         numeric_cols = cols_info.numeric_cols
         binary_cols = cols_info.binary_cols
         features = numeric_cols + binary_cols
-        for split in ['random','sonson','caldas']:
+        fig, ax = plt.subplots(1,3)
+        for loc, split in enumerate(['random','sonson','caldas']):
             train_labeled = pd.read_csv(root + f'/processed_dataset/{split}/train/train_labeled.csv', index_col=0)
             test_labeled = pd.read_csv(root + f'/processed_dataset/{split}/test/test_labeled.csv', index_col=0)
             X_train = np.array(train_labeled.loc[:, features])
@@ -35,39 +36,20 @@ def plot_distribution_shift(root='~/social_good/Landmine-risk-prediction'):
             pca = PCA(n_components=2)
             pca.fit(X_all)
 
-            colors = ["navy", "darkorange", "turquoise", "pink"]
-            target_names = ["train(y=0)", "train(y=1)","test(y=0)", "test(y=1)"]
+            colors = ["navy", "darkorange"]
+            target_names = ["train","test"]
 
-            for color, i, target_name in zip(colors, [0, 1, 2, 3], target_names):
-                if target_name == "train(y=0)":
+            for color, i, target_name in zip(colors, [0, 1], target_names):
+                if target_name == "train":
                     X_train_tsfm = pca.transform(X_train)
-                    filter_idx = (y_train == 0).nonzero()[0]
-                    plt.scatter(
-                        X_train_tsfm[filter_idx, 0], X_train_tsfm[filter_idx, 1], color=color, alpha=0.8, label=target_name
-                    )
-                elif target_name == "train(y=1)":
-                    X_train_tsfm = pca.transform(X_train)
-                    filter_idx = (y_train == 1).nonzero()[0]
-                    plt.scatter(
-                        X_train_tsfm[filter_idx, 0], X_train_tsfm[filter_idx, 1], color=color, alpha=0.8, label=target_name
-                    )
-                elif target_name == 'test(y=0)':
+                    ax[loc].scatter(X_train_tsfm[:,0],X_train_tsfm[:,1],color=color,alpha=0.8,label=target_name)
+                elif target_name == "test":
                     X_test_tsfm = pca.transform(X_test)
-                    filter_idx = (y_test == 0).nonzero()[0]
-                    plt.scatter(
-                        X_test_tsfm[filter_idx, 0], X_test_tsfm[filter_idx, 1], color=color, alpha=0.8, label=target_name
-                    )
-                elif target_name == 'test(y=1)':
-                    X_test_tsfm = pca.transform(X_test)
-                    filter_idx = (y_test == 1).nonzero()[0]
-                    plt.scatter(
-                        X_test_tsfm[filter_idx, 0], X_test_tsfm[filter_idx, 1], color=color, alpha=0.8, label=target_name
-                    )
-            plt.xlabel('PCA1')
-            plt.ylabel('PCA2')
-            plt.legend(loc="best")
-            plt.savefig(root + f'/refactor/tabular/results/PCA/{split}_{dataset}_PCA.png') 
-            plt.clf()
+                    ax[loc].scatter(X_test_tsfm[:,0], X_test_tsfm[:,1], color=color, alpha=0.8, label=target_name)
+                ax[loc].set_title(split.upper(),fontsize=18)
+                if loc == 2:
+                    ax[loc].legend(loc="upper center",fontsize=18)
+        plt.savefig(root + '/PCA.pdf')
     return
 
 def get_feature_importance(all_test_bases, root='~/social_good/Landmine-risk-prediction'):
@@ -106,7 +88,7 @@ def get_feature_importance(all_test_bases, root='~/social_good/Landmine-risk-pre
         sortidx = np.argsort(three_models_avg)
         df[f'{split}_rank'] = np.argsort(sortidx)
         orders[split] = [all_features[i] for i in sortidx]
-    df.to_csv(root + f'/refactor/tabular/results/feature_importance/ensemble_base_importance.csv',index=False)
+    df.to_csv(root + f'/processed_dataset/results/ensemble_base_importance.csv',index=False)
     return orders
 
 
@@ -139,12 +121,13 @@ def plot_pdp(ensemble_pairs, root='~/social_good/Landmine-risk-prediction'):
                                                               response_method='predict_proba',
                                                               random_state=i)
             plt.ylabel("Probablity of y = 1")
-            plt.savefig(root + f'/refactor/tabular/results/feature_importance/pdp/{fit}/{features[i]}.png')
+            plt.savefig(root + f'/processed_data/results/pdp/{features[i]}.png')
             plt.clf()           
     return "All pdp plots saved."
 
 if __name__ == '__main__':
-    all_test_bases, underfit_ensembles = prepare_test_base_models()
+    all_test_bases, underfit_ensembles = prepare_test_base_models(False)
     orders = get_feature_importance(all_test_bases)
-    plot_pdp([('underfit',underfit_ensembles)])
+    all_bases, overfit_ensembles = prepare_test_base_models(False)
+    plot_pdp([('overfit',overfit_ensembles)])
     plot_distribution_shift()
