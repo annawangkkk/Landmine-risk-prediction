@@ -20,6 +20,37 @@
     text-align: center;
 }
 
-#recycling_type,#risk_clusters {
+#recycling_type,
+#risk_clusters {
     margin-left: 30px;
+}
+
+#unknown {
+    color: gray;
+    font-weight: bold;
+}
+
+#negative {
+    color: green;
+    font-weight: bold;
+}
+
+#low {
+    color: rgb(98, 159, 159);
+    font-weight: bold;
+}
+
+#positive,
+#high {
+    color: red;
+    font-weight: bold;
+}
+
+#medium {
+    color: rgb(245, 221, 43);
+    font-weight: bold;
+}
+
+#showPrediction {
+    font-size: 16px;
 }
