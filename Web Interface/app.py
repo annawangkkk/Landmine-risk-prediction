@@ -29,7 +29,7 @@ app.layout = dbc.Container([
 
     dbc.Row([
         # dbc.Col(html.H5("Choose The Model")),
-        dbc.Col(html.H5("Choose The Map Layer")),
+        dbc.Col(html.H5("Choose The Map Style")),
         dbc.Col(html.H5("Choose The Areas"))
 
     ]),
@@ -60,122 +60,88 @@ app.layout = dbc.Container([
     ]),
     html.Hr(),
     dbc.Row([
-        dbc.Col(html.H5("Risk Prediction"))
-    ]),
-
-    dbc.Row(
-
-        dbc.Checklist(
-            options=[
-                {
-                    "label": "Show the landmine risk prediction by RELand system",
-                    "value": "sonson_avg",
-                    "label_id": "showPrediction"
-                }, ],
-            value=['sonson_avg'],
-            id="model"
-        ),
-    ),
-    dbc.Row(html.P('Disclaimer: The information presented here should be taken only as an estimate resulting from academic research and should be analyzed with other expert knowledge to determine the actual risk of landmines in the studied area in a human-in-the-loop approach.'),
-            style={'font-size': '13px'}),
-    html.Hr(),
-
-
-
+        dbc.Col(html.H5("Risk Prediction")),
+        # search bar for searching address
+        dbc.Col([dbc.Row([dbc.Textarea(id='address-search-tab1',
+                                       placeholder='Search for the street or area'),
+                 dbc.Button(
+                     'Find', id='search-address-button-tab1', n_clicks=0),
+                 # html.P(id='no-result-alert')
+                 ])
+                 ], width=7)]),
     dbc.Row([
-        dbc.Col(html.H5("Historical Events")),
-        # dbc.Col(html.H5(
-        #     "Danger Zones")),
-    ]),
-    dbc.Row(html.P('The data is from Comprehensive Action Against Anti-personnel Mines of the Office of the High Commissioner for Peace of Colombia.'),
-            style={'font-size': '13px'}, id='groundTruth'),
-
-    dbc.Row([
-
         dbc.Col([
-            dbc.Checklist(
-                id="all-or-none",
-                options=[{"label": "Select All", "value": "All"}],
-                value=[],
-                labelStyle={"display": "inline-block"},
-            ),
+            dbc.Row(dbc.Checklist(
+                options=[
+                    {
+                        "label": "Show the landmine risk prediction by RELand system",
+                        "value": "sonson_avg",
+                        "label_id": "showPrediction"
+                    }, ],
+                value=['sonson_avg'],
+                id="model"
+            )),
+            html.Hr(),
+            dbc.Row(html.H5("Historical Events")),
+            dbc.Row([
+                    dbc.Checklist(
+                        id="all-or-none",
+                        options=[{"label": "Select All", "value": "All"}],
+                        value=[],
+                        labelStyle={"display": "inline-block"},
+                    ),
 
-            dbc.Checklist(id="recycling_type",
-                          value=[''],
-                          options=[
-                              {'value': -1, 'label': 'Areas with no historical data',
-                                  'label_id': 'unknown'},
-                              {'value': 0, 'label': 'Areas declared mine-free',
-                                  'label_id': 'negative'},
-                              {'value': 1, 'label': 'Areas affected by landmines',
-                                  'label_id': 'positive'},
-                          ],
-
-
-                          ),
-
-        ]),
-
-
-
-    ]),
-
-
-    html.Hr(),
-
-    dbc.Row([
-        dbc.Col(html.H5("Danger Zones")),
-    ]),
-    dbc.Row(html.P('Clustered zones with similar levels of risk for the regions with no historical data.'),
-            style={'font-size': '13px'}),
-
-
-    dbc.Row([
-
-        dbc.Col([
-            dbc.Checklist(
-                id="all-or-none-clusters",
-                options=[{"label": "Select All", "value": "All"}],
-                value=[],
-                labelStyle={"display": "inline-block"},
-            ),
-
-            dbc.Checklist(id="risk_clusters",
-                          value=[''],
-                          options=[
+                    dbc.Checklist(id="recycling_type",
+                                  value=[''],
+                                  options=[
+                                      {'value': -1, 'label': 'Areas with no historical data',
+                                       'label_id': 'unknown'},
+                                      {'value': 0, 'label': 'Areas declared mine-free',
+                                       'label_id': 'negative'},
+                                      {'value': 1, 'label': 'Areas affected by landmines',
+                                       'label_id': 'positive'},
+                                  ],)
+                    ]),
+            html.Hr(),
+            dbc.Row(html.H5("Danger Zones")),
+            dbc.Row(html.P('For the areas with no historical data.'),
+                    style={'font-size': '13px'}),
+            dbc.Row([
+                dbc.Checklist(
+                    id="all-or-none-clusters",
+                    options=[{"label": "Select All", "value": "All"}],
+                    value=[],
+                    labelStyle={"display": "inline-block"},
+                ),
+                dbc.Checklist(id="risk_clusters", value=[''],
+                              options=[
                               {'value': 2, 'label': 'Low Risk region predicted by RELand system',
                                   'label_id': 'low'},
                               {'value': 0, 'label': 'Medium Risk region predicted by RELand system',
                                   'label_id': 'medium'},
                               {'value': 1, 'label': 'High Risk region predicted by RELand system',
                                   'label_id': 'high'},
-                          ]),
+                              ]),
 
-        ])
 
+            ]),
+
+        ], width=5),
+
+
+        dbc.Col(dcc.Graph(id='map', figure={}), width=7)
     ]),
-
-
-
 
     html.Hr(),
 
-    # search bar for searching address
-    dbc.Row([
-        dbc.Textarea(id='address-search-tab1',
-                        placeholder='Search for the street or area'),
-        dbc.Button('Find', id='search-address-button-tab1', n_clicks=0),
-        # html.P(id='no-result-alert')
-    ]),
-
-    dbc.Row(dcc.Graph(id='map', figure={})),
+    dbc.Row(html.P('Disclaimer: The information presented here should be taken only as an estimate resulting from academic research and should be analyzed with other expert knowledge to determine the actual risk of landmines in the studied area in a human-in-the-loop approach.'),
+            style={'font-size': '13px'}),
     html.Br(),
-
 
 ])
 
 
-@app.callback(
+@ app.callback(
     Output('area', 'value'),
     [Input('select-all-regions', 'value')],
     [State('area', 'options')])
@@ -189,7 +155,7 @@ def showAllRegions(selected, options):
 # ------------------------------------------------------------------------------
 
 
-@app.callback(
+@ app.callback(
     Output(component_id='map', component_property='figure'),
     [Input('area', 'value'),
      Input(component_id='model', component_property='value'),
@@ -224,7 +190,7 @@ def update_graph(area, option_slctd, layer, chosen_label, n_clicks, chosen_clust
 
     df_sub = df_1[(df_1['mines_outcome'].isin(chosen_label))]
 
-    #df.loc[df['col1'] == value]
+    # df.loc[df['col1'] == value]
 
     df_sub_cluster = df_1_unknow[(
         df_1_unknow['cluster'].isin(chosen_cluster))]
