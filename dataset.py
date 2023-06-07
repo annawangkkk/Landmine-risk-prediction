@@ -93,14 +93,14 @@ class Event(Dataset):
         self.features = self.numeric_cols + self.binary_cols
         
         tabX = pd.get_dummies(columns=['land_use', 'weather', 'relief'], data = data)[self.features]
-        if val_municipio == 'RANDOM' or val_municipio == 'PUERTO LIBERTADOR': # train_val split + test
+        if val_municipio == 'RANDOM' or val_municipio == 'PUERTO LIBERTADOR' or val_municipio == 'MURINDÓ': # train_val split + test
             train_tabX_combined = tabX.loc[list(data[data['Municipio'].isin(train_municipios)].index),self.features]
             np.random.RandomState(737)
             train_idx = pd.Index(np.random.choice(train_tabX_combined.index, int(len(train_tabX_combined)*0.7), replace=False))
             train_tabX = train_tabX_combined.loc[train_idx]
             if val_municipio == 'RANDOM':
                 val_tabX = train_tabX_combined.loc[~train_tabX_combined.index.isin(train_idx)]
-            elif val_municipio == 'PUERTO LIBERTADOR':
+            elif val_municipio == 'PUERTO LIBERTADOR' or val_municipio == 'MURINDÓ':
                 val_tabX = tabX.loc[list(data[data['Municipio'] == val_municipio].index),self.features]
         else:
             train_tabX = tabX.loc[list(data[data['Municipio'].isin(train_municipios)].index),self.features]
@@ -132,7 +132,7 @@ class Event(Dataset):
                 self.tabX = val_tabX.to_numpy()
                 self.hist_mine = all_hist_mine[list(data[data['Municipio'] == val_municipio].index)]
         elif self.split == 'train': 
-            if val_municipio == 'RANDOM' or val_municipio == 'PUERTO LIBERTADOR':
+            if val_municipio == 'RANDOM' or val_municipio == 'PUERTO LIBERTADOR' or val_municipio == 'MURINDÓ':
                 self.locations = all_locations[list(train_idx)]
                 self.y = data.loc[train_idx,'mines_outcome'].to_numpy()
                 self.tabX = train_tabX.to_numpy()

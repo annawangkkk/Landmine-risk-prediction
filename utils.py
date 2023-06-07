@@ -24,7 +24,7 @@ def mean_reverse_height(y_truth, y_pred):
     y_truth = np.array(y_truth).astype(np.uint8)
     pos = y_pred[y_truth == 1]
     neg = y_pred[y_truth == 0] 
-    proba_diff = (pos[:,None] - neg[None,:]) # neg*pos
+    proba_diff = (pos[:,None] - neg[None,:]) # pos*neg
     proba_indicator = np.sum(proba_diff <= 0, axis=1) # neg
     return np.mean(proba_indicator) # the smaller the better
 

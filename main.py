@@ -65,6 +65,8 @@ def main(timestamp : str, train_val_stream : List):
             val_data = Event(train_municipios, val_municipio, subset, split='val')
             if args.municipio == 'puerto':
                 test_data = Event(train_municipios, 'PUERTO LIBERTADOR', subset, split='val')
+            elif args.municipio == 'murindo':
+                test_data = Event(train_municipios, 'MURINDÓ', subset, split='val')
 
             feature_importance['features'] = val_data.features
 
@@ -77,7 +79,7 @@ def main(timestamp : str, train_val_stream : List):
             lat_lon_train = train_data.locations
             hist_train = train_data.hist_mine 
 
-            if args.municipio == 'puerto':
+            if args.municipio == 'puerto' or args.municipio == 'murindo':
                 X_test = test_data.tabX
                 y_test = test_data.y
                 lat_lon_test = test_data.locations
@@ -135,12 +137,12 @@ def main(timestamp : str, train_val_stream : List):
             # fit
             if model_name == 'TabCmpt' or model_name == 'MLP':
                 ckpt = model.fit(train_data, val_data) # get validation result
-                if args.municipio == 'puerto':
+                if args.municipio == 'puerto' or args.municipio == 'murindo':
                     _, _, _, _, test_pred, _ = model.predict_proba(test_dataset = test_data)
             elif model_name == 'LGBM' and objective == 'pnorm':
                 model.fit(X_train,y_train,eval_set=[(X_val, y_val)],early_stopping_rounds=epochs,eval_metric="auc")
                 val_pred = sigmoid(model.predict(np.array(X_val), raw_score=True))
-                if args.municipio == 'puerto':
+                if args.municipio == 'puerto' or args.municipio == 'murindo':
                     test_pred = sigmoid(model.predict(np.array(X_test), raw_score=True))
             elif model_name == 'TabNet' and objective == 'erm':
                 if args.municipio == 'transfer':
@@ -156,7 +158,7 @@ def main(timestamp : str, train_val_stream : List):
                             eval_metric=['auc'], max_epochs=epochs, 
                             patience=epochs, batch_size=batch_size, num_workers=num_workers)
                 val_pred = model.predict_proba(np.array(X_val))[:,1]
-                if args.municipio == 'puerto':
+                if args.municipio == 'puerto' or args.municipio == 'murindo':
                     test_pred = model.predict_proba(np.array(X_test))[:,1]
             elif model_name == 'TabNet' and objective == 'irm':
                 model.fit(X_train,y_train, hist_train,
@@ -164,12 +166,12 @@ def main(timestamp : str, train_val_stream : List):
                           eval_metric=['auc'], max_epochs=epochs, 
                           patience=epochs, batch_size=batch_size, num_workers=num_workers)
                 val_pred = model.predict_proba(np.array(X_val))[:,1]
-                if args.municipio == 'puerto':
+                if args.municipio == 'puerto' or args.municipio == 'murindo':
                     test_pred = model.predict_proba(np.array(X_test))[:,1]
             else:
                 model.fit(X_train,y_train)
                 val_pred = model.predict_proba(np.array(X_val))[:,1]
-                if args.municipio == 'puerto':
+                if args.municipio == 'puerto' or args.municipio == 'murindo':
                     test_pred = model.predict_proba(np.array(X_test))[:,1]
             
             if model_name != 'TabCmpt' and model_name != 'MLP':
@@ -265,7 +267,7 @@ def main(timestamp : str, train_val_stream : List):
         feature_importance_df.to_csv(f'./experiments/{timestamp}/feature_importance.csv',index=False)
     
         # only train once for test set
-        if args.municipio == 'puerto':
+        if args.municipio == 'puerto' or args.municipio == 'murindo':
             lat_lon_test = test_data.locations
             test_df = (pd.DataFrame({'LONGITUD_X':lat_lon_test[:,0], 
                                     'LATITUD_Y':lat_lon_test[:,1],
@@ -273,7 +275,10 @@ def main(timestamp : str, train_val_stream : List):
             test_df.to_csv(f'./experiments/{timestamp}/test_results.csv',index=False)
             _, axes = plt.subplots(nrows=1, ncols=1, figsize=(5,5))
             mappable = plt.scatter(lat_lon_test[:,0], lat_lon_test[:,1], c=test_pred)
-            axes.set_title('PUERTO LIBERTADOR')
+            if args.municipio == 'puerto':
+                axes.set_title('PUERTO LIBERTADOR')
+            elif args.municipio == 'murindo':
+                axes.set_title('MURINDÓ')
             plt.colorbar(mappable)
             plt.savefig(f'./experiments/{timestamp}/test_results.png')
             plt.clf()
