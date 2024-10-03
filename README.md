@@ -1,6 +1,6 @@
 # Landmine-risk-prediction
 
-Repo of RELand.
+Repo of [RELand: Risk Estimation of Landmines via Interpretable Invariant Risk Minimization](https://dl.acm.org/doi/full/10.1145/3648437).
 
 # Requirements
 
@@ -46,3 +46,24 @@ Your final result for this run will be stored under `/experiments/<timestamp>` t
 
 # Acknowledgment
 We borrow and edit packages including [ood-bench](https://github.com/m-Just/OoD-Bench), [scikit-learn/tree](https://github.com/scikit-learn/scikit-learn/tree/9aaed498795f68e5956ea762fef9c440ca9eb239/sklearn/tree), [pytorch-tabnet](https://github.com/dreamquark-ai/tabnet).
+
+# Citations
+If you find our work helpful, please consider cite our paper:
+```
+@article{10.1145/3648437,
+author = {Dulce Rubio, Mateo and Zeng, Siqi and Wang, Qi and Alvarado, Didier and Moreno Rivera, Francisco and Heidari, Hoda and Fang, Fei},
+title = {RELand: Risk Estimation of Landmines via Interpretable Invariant Risk Minimization},
+year = {2024},
+issue_date = {June 2024},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+volume = {2},
+number = {2},
+url = {https://doi.org/10.1145/3648437},
+doi = {10.1145/3648437},
+month = jun,
+articleno = {23},
+numpages = {29},
+keywords = {Landmines, demining, risk assessment}
+}
+```
